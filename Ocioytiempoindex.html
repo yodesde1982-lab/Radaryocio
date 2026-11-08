@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeteoRadar Pro - Local Hub & Social Feed</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .dark-glass {
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        #radarMap { height: 400px; width: 100%; border-radius: 1rem; z-index: 10; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen pb-12 selection:bg-blue-500 selection:text-white">
+
+    <!-- Header Navigation -->
+    <header class="sticky top-0 z-40 dark-glass border-b border-slate-800/80 mb-6 px-4 py-3">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-tr from-blue-600 to-cyan-400 p-2.5 rounded-xl shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid font-bold text-xl fa-cloud-bolt text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-extrabold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">MeteoRadar Pro</h1>
+                    <p class="text-xs text-slate-400 font-medium">Clima, Radar, Ropa, Actividades y Social Hub</p>
+                </div>
+            </div>
+
+            <!-- Enhanced Search Form -->
+            <form id="searchForm" class="flex items-center gap-2 w-full sm:w-auto">
+                <div class="relative w-full sm:w-96">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input type="text" id="searchInput" placeholder="Empresa, calle, CP o ciudad (ej. Badajoz, 06001)" 
+                        class="w-full pl-10 pr-4 py-2 bg-slate-800/90 text-sm rounded-xl border border-slate-700/60 focus:outline-none focus:border-blue-500 text-white placeholder-slate-400 shadow-inner">
+                </div>
+                <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-sm font-semibold rounded-xl transition shadow-md shadow-blue-600/30 whitespace-nowrap">
+                    Buscar
+                </button>
+                <button type="button" id="locBtn" title="Usar mi ubicación actual" class="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 rounded-xl border border-slate-700 transition">
+                    <i class="fa-solid fa-location-crosshairs text-base"></i>
+                </button>
+            </form>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 space-y-6">
+
+        <!-- Status & Error Alert -->
+        <div id="alertBox" class="hidden p-4 bg-red-500/20 border border-red-500/40 rounded-xl text-red-200 text-sm flex items-center gap-3">
+            <i class="fa-solid fa-circle-exclamation text-lg"></i>
+            <span id="alertText">No se ha encontrado la ubicación especificada.</span>
+        </div>
+
+        <!-- Top Weather Overview Card -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-1 bg-gradient-to-br from-slate-800/90 to-slate-900/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl flex flex-col justify-between relative overflow-hidden">
+                <div>
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h2 id="cityName" class="text-2xl font-bold text-white tracking-tight">Cargando...</h2>
+                            <p id="cityCoords" class="text-xs text-slate-400 font-mono mt-0.5">Lat: -- | Lon: --</p>
+                        </div>
+                        <span class="px-3 py-1 bg-blue-500/20 text-blue-300 text-xs font-semibold rounded-full border border-blue-500/30">En vivo</span>
+                    </div>
+                    <div class="flex items-center gap-6 my-4">
+                        <div id="weatherIconContainer" class="text-5xl text-blue-400"><i class="fa-solid fa-cloud-sun-rain"></i></div>
+                        <div>
+                            <div class="flex items-baseline">
+                                <span id="currentTemp" class="text-5xl font-extrabold text-white">--</span>
+                                <span class="text-2xl font-bold text-slate-400 ml-1">°C</span>
+                            </div>
+                            <p id="weatherDesc" class="text-sm font-medium text-slate-300 capitalize">Obteniendo datos...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 pt-4 border-t border-slate-700/60 text-center">
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/40">
+                        <p class="text-[11px] text-slate-400">Sensación</p>
+                        <p id="feelsLike" class="text-sm font-bold text-slate-200 mt-0.5">-- °C</p>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/40">
+                        <p class="text-[11px] text-slate-400">Viento</p>
+                        <p id="windSpeed" class="text-sm font-bold text-slate-200 mt-0.5">-- km/h</p>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/40">
+                        <p class="text-[11px] text-slate-400">Humedad</p>
+                        <p id="humidity" class="text-sm font-bold text-slate-200 mt-0.5">-- %</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Outfits & General Advice -->
+            <div class="lg:col-span-2 bg-gradient-to-br from-slate-800/90 to-slate-900/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-shirt text-blue-400"></i> Recomendación de Vestuario Inteligente
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div class="bg-slate-800/80 p-4 rounded-xl border border-slate-700/60">
+                            <div class="text-cyan-400 text-xs font-semibold uppercase mb-1"><i class="fa-solid fa-layer-group"></i> Capa Exterior</div>
+                            <p id="outerwearAdvice" class="text-sm font-medium text-slate-200">Analizando...</p>
+                        </div>
+                        <div class="bg-slate-800/80 p-4 rounded-xl border border-slate-700/60">
+                            <div class="text-amber-400 text-xs font-semibold uppercase mb-1"><i class="fa-solid fa-vest"></i> Prenda Base</div>
+                            <p id="baseAdvice" class="text-sm font-medium text-slate-200">Analizando...</p>
+                        </div>
+                        <div class="bg-slate-800/80 p-4 rounded-xl border border-slate-700/60">
+                            <div class="text-emerald-400 text-xs font-semibold uppercase mb-1"><i class="fa-solid fa-shoe-prints"></i> Calzado</div>
+                            <p id="footwearAdvice" class="text-sm font-medium text-slate-200">Analizando...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-blue-950/40 border border-blue-800/50 p-4 rounded-xl flex items-start gap-3">
+                    <i class="fa-solid fa-lightbulb text-blue-400 text-lg mt-0.5"></i>
+                    <div>
+                        <h4 class="text-xs font-bold text-blue-300 uppercase">Consejo Meteorológico</h4>
+                        <p id="generalTip" class="text-xs text-slate-300 mt-0.5">Cargando sugerencias...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Real-Time Precipitation Radar -->
+        <div class="bg-slate-800/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between gap-4">
+                <div>
+                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-satellite-dish text-emerald-400"></i> Radar Climatológico en Tiempo Real
+                    </h3>
+                    <p class="text-xs text-slate-400">Capa interactiva RainViewer</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="playRadarBtn" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-play"></i> Reproducción Animada
+                    </button>
+                    <span id="radarTimestamp" class="text-xs font-mono bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300">--:--</span>
+                </div>
+            </div>
+            <div id="radarMap" class="shadow-inner border border-slate-700/60"></div>
+        </div>
+
+        <!-- Hourly & 7-Day Forecast -->
+        <div class="bg-slate-800/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl">
+            <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-clock text-amber-400"></i> Previsión Detallada
+            </h3>
+            <div class="mb-6">
+                <h4 class="text-xs font-semibold text-slate-400 uppercase mb-3">Próximas 12 Horas</h4>
+                <div id="hourlyContainer" class="flex gap-3 overflow-x-auto pb-3 custom-scrollbar"></div>
+            </div>
+            <div>
+                <h4 class="text-xs font-semibold text-slate-400 uppercase mb-3">Previsión 7 Días</h4>
+                <div id="dailyContainer" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3"></div>
+            </div>
+        </div>
+
+        <!-- NEW: Social Feed, News & Offers Hub -->
+        <div class="bg-slate-800/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl space-y-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-700/60 pb-4">
+                <div>
+                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-rss text-rose-400"></i> Actualidad, Ofertas, Eventos y Redes Sociales
+                    </h3>
+                    <p class="text-xs text-slate-400">Publicaciones de empresas, comercios locales, medios y avisos de la zona</p>
+                </div>
+                
+                <!-- Social Feed Filter Tabs -->
+                <div class="flex flex-wrap items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-700">
+                    <button id="feedAll" class="feed-filter px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 text-white transition">Todo</button>
+                    <button id="feedNews" class="feed-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">Noticias</button>
+                    <button id="feedOffers" class="feed-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">Ofertas</button>
+                    <button id="feedEvents" class="feed-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">Eventos</button>
+                    <button id="feedSocial" class="feed-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">Redes</button>
+                </div>
+            </div>
+
+            <!-- Feed Grid Container -->
+            <div id="socialFeedGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Dynamically injected feed posts -->
+            </div>
+        </div>
+
+        <!-- Heritage & History Hub -->
+        <div class="bg-slate-800/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl space-y-6">
+            <div class="flex justify-between items-center border-b border-slate-700/60 pb-4">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-landmark text-amber-400"></i> Historia y Patrimonio Cultural
+                </h3>
+                <span id="heritageCityTag" class="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold rounded-full">Zona</span>
+            </div>
+            <div class="bg-slate-900/60 p-5 rounded-xl border border-slate-700/50">
+                <p id="cityHistoryText" class="text-xs text-slate-300 leading-relaxed">Cargando...</p>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div id="landmarksContainer" class="space-y-3"></div>
+                <div id="eventsContainer" class="space-y-3"></div>
+            </div>
+        </div>
+
+        <!-- Activities Section -->
+        <div class="bg-slate-800/90 p-6 rounded-2xl border border-slate-700/50 shadow-xl space-y-6">
+            <div class="flex justify-between items-center border-b border-slate-700/60 pb-4">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-compass text-cyan-400"></i> Actividades y Ocio Recomendado
+                </h3>
+                <div class="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-700">
+                    <button id="filterAll" class="activity-filter px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 text-white">Todas</button>
+                    <button id="filterOutdoor" class="activity-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400">Exterior</button>
+                    <button id="filterIndoor" class="activity-filter px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400">Interior</button>
+                </div>
+            </div>
+            <div id="activitiesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </div>
+
+    </main>
+
+    <!-- Modal -->
+    <div id="activityModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar shadow-2xl relative p-6 text-slate-100">
+            <button id="closeModalBtn" class="absolute top-4 right-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-full transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+            <div class="flex items-center gap-3 mb-4">
+                <div id="modalCategoryIcon" class="p-3 bg-blue-500/20 text-blue-400 rounded-xl text-xl"><i class="fa-solid fa-map-location-dot"></i></div>
+                <div>
+                    <span id="modalTypeBadge" class="px-2.5 py-0.5 text-[10px] font-bold uppercase bg-slate-800 text-slate-300 rounded-md border border-slate-700">Cat</span>
+                    <h3 id="modalTitle" class="text-xl font-extrabold text-white mt-1">Título</h3>
+                </div>
+            </div>
+            <p id="modalDescription" class="text-sm text-slate-300 mb-6">Desc...</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div class="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
+                    <span class="text-[11px] text-slate-400 uppercase block mb-1"><i class="fa-solid fa-location-dot text-red-400 mr-1"></i> Ubicación</span>
+                    <p id="modalLocation" class="text-xs font-bold text-slate-200">Ubicación</p>
+                </div>
+                <div class="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
+                    <span class="text-[11px] text-slate-400 uppercase block mb-1"><i class="fa-solid fa-ticket text-emerald-400 mr-1"></i> Entrada</span>
+                    <p id="modalPrice" class="text-xs font-bold text-slate-200">Precio</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <a id="modalMapLink" href="#" target="_blank" class="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl text-center"><i class="fa-solid fa-map-location-dot"></i> Mapa</a>
+                <a id="modalTicketLink" href="#" target="_blank" class="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl text-center"><i class="fa-solid fa-arrow-up-right-from-square"></i> Web / Entradas</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const state = {
+            lat: 38.8794,
+            lon: -6.9707,
+            cityName: "Badajoz",
+            weatherData: null,
+            radarMap: null,
+            radarLayers: [],
+            radarTimestamps: [],
+            currentRadarIndex: 0,
+            radarInterval: null,
+            currentFilter: 'all',
+            feedFilter: 'all',
+            activitiesList: [],
+            socialFeedList: []
+        };
+
+        const elements = {
+            searchForm: document.getElementById('searchForm'),
+            searchInput: document.getElementById('searchInput'),
+            locBtn: document.getElementById('locBtn'),
+            alertBox: document.getElementById('alertBox'),
+            alertText: document.getElementById('alertText'),
+            cityName: document.getElementById('cityName'),
+            cityCoords: document.getElementById('cityCoords'),
+            currentTemp: document.getElementById('currentTemp'),
+            weatherDesc: document.getElementById('weatherDesc'),
+            feelsLike: document.getElementById('feelsLike'),
+            windSpeed: document.getElementById('windSpeed'),
+            humidity: document.getElementById('humidity'),
+            outerwearAdvice: document.getElementById('outerwearAdvice'),
+            baseAdvice: document.getElementById('baseAdvice'),
+            footwearAdvice: document.getElementById('footwearAdvice'),
+            generalTip: document.getElementById('generalTip'),
+            hourlyContainer: document.getElementById('hourlyContainer'),
+            dailyContainer: document.getElementById('dailyContainer'),
+            landmarksContainer: document.getElementById('landmarksContainer'),
+            eventsContainer: document.getElementById('eventsContainer'),
+            cityHistoryText: document.getElementById('cityHistoryText'),
+            heritageCityTag: document.getElementById('heritageCityTag'),
+            activitiesGrid: document.getElementById('activitiesGrid'),
+            socialFeedGrid: document.getElementById('socialFeedGrid'),
+            playRadarBtn: document.getElementById('playRadarBtn'),
+            radarTimestamp: document.getElementById('radarTimestamp'),
+            activityModal: document.getElementById('activityModal'),
+            closeModalBtn: document.getElementById('closeModalBtn'),
+            modalCategoryIcon: document.getElementById('modalCategoryIcon'),
+            modalTypeBadge: document.getElementById('modalTypeBadge'),
+            modalTitle: document.getElementById('modalTitle'),
+            modalDescription: document.getElementById('modalDescription'),
+            modalLocation: document.getElementById('modalLocation'),
+            modalPrice: document.getElementById('modalPrice'),
+            modalMapLink: document.getElementById('modalMapLink'),
+            modalTicketLink: document.getElementById('modalTicketLink')
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initLeafletMap();
+            fetchCoordinatesAndWeather("Badajoz");
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            elements.searchForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const query = elements.searchInput.value.trim();
+                if (query) fetchCoordinatesAndWeather(query);
+            });
+
+            elements.locBtn.addEventListener('click', () => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => fetchWeatherByCoords(pos.coords.latitude, pos.coords.longitude, "Mi Ubicación"),
+                        () => showAlert("No se pudo obtener la geolocalización.")
+                    );
+                }
+            });
+
+            document.querySelectorAll('.activity-filter').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.activity-filter').forEach(b => b.classList.remove('bg-blue-600', 'text-white'));
+                    e.currentTarget.classList.add('bg-blue-600', 'text-white');
+                    state.currentFilter = e.currentTarget.id === 'filterOutdoor' ? 'outdoor' : e.currentTarget.id === 'filterIndoor' ? 'indoor' : 'all';
+                    renderActivities();
+                });
+            });
+
+            document.querySelectorAll('.feed-filter').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.feed-filter').forEach(b => b.classList.remove('bg-blue-600', 'text-white'));
+                    e.currentTarget.classList.add('bg-blue-600', 'text-white');
+                    const id = e.currentTarget.id;
+                    state.feedFilter = id === 'feedNews' ? 'news' : id === 'feedOffers' ? 'offer' : id === 'feedEvents' ? 'event' : id === 'feedSocial' ? 'social' : 'all';
+                    renderSocialFeed();
+                });
+            });
+
+            elements.playRadarBtn.addEventListener('click', toggleRadarAnimation);
+            elements.closeModalBtn.addEventListener('click', closeModal);
+        }
+
+        function initLeafletMap() {
+            state.radarMap = L.map('radarMap').setView([state.lat, state.lon], 8);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(state.radarMap);
+        }
+
+        async function fetchCoordinatesAndWeather(query) {
+            try {
+                const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=es&format=json`);
+                const data = await res.json();
+                if (data.results && data.results.length > 0) {
+                    const place = data.results[0];
+                    state.lat = place.latitude;
+                    state.lon = place.longitude;
+                    fetchWeatherByCoords(state.lat, state.lon, `${place.name}${place.admin1 ? ', ' + place.admin1 : ''}`);
+                } else {
+                    showAlert(`No se encontró "${query}".`);
+                }
+            } catch (err) {
+                showAlert("Error de conexión al buscar ubicación.");
+            }
+        }
+
+        async function fetchWeatherByCoords(lat, lon, displayName) {
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
+                const res = await fetch(url);
+                state.weatherData = await res.json();
+                state.cityName = displayName;
+
+                updateCurrentWeatherUI();
+                updateOutfitRecommendations();
+                updateForecastUI();
+                updateHistoricalAndHeritageUI();
+                generateActivitiesData();
+                renderActivities();
+                generateSocialFeedData();
+                renderSocialFeed();
+                updateRadarMap();
+            } catch (err) {
+                showAlert("Error al descargar datos climáticos.");
+            }
+        }
+
+        function updateCurrentWeatherUI() {
+            const current = state.weatherData.current;
+            elements.cityName.textContent = state.cityName;
+            elements.cityCoords.textContent = `Lat: ${state.lat.toFixed(2)} | Lon: ${state.lon.toFixed(2)}`;
+            elements.currentTemp.textContent = Math.round(current.temperature_2m);
+            elements.feelsLike.textContent = `${Math.round(current.apparent_temperature)} °C`;
+            elements.windSpeed.textContent = `${Math.round(current.wind_speed_10m)} km/h`;
+            elements.humidity.textContent = `${current.relative_humidity_2m} %`;
+            const info = getWeatherInfo(current.weather_code);
+            elements.weatherDesc.textContent = info.desc;
+            elements.weatherIconContainer.innerHTML = `<i class="fa-solid ${info.icon}"></i>`;
+        }
+
+        function updateOutfitRecommendations() {
+            const temp = state.weatherData.current.temperature_2m;
+            elements.outerwearAdvice.textContent = temp < 15 ? "Chaqueta o abrigo recomendado." : "Ropa ligera.";
+            elements.baseAdvice.textContent = "Jersey o camisa cómoda.";
+            elements.footwearAdvice.textContent = "Calzado urbano.";
+            elements.generalTip.textContent = "Disfruta de la jornada con precaución según el clima.";
+        }
+
+        async function updateRadarMap() {
+            state.radarMap.setView([state.lat, state.lon], 8);
+            state.radarLayers.forEach(l => state.radarMap.removeLayer(l));
+            state.radarLayers = [];
+            try {
+                const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                const data = await res.json();
+                const frames = data.radar.past.concat(data.radar.nowcast || []);
+                state.radarTimestamps = frames;
+                frames.forEach((frame, idx) => {
+                    const tileLayer = L.tileLayer(`${data.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: idx === frames.length - 1 ? 0.75 : 0 });
+                    tileLayer.addTo(state.radarMap);
+                    state.radarLayers.push(tileLayer);
+                });
+                state.currentRadarIndex = state.radarLayers.length - 1;
+            } catch (err) {}
+        }
+
+        function toggleRadarAnimation() {
+            if (state.radarInterval) {
+                clearInterval(state.radarInterval);
+                state.radarInterval = null;
+                elements.playRadarBtn.innerHTML = `<i class="fa-solid fa-play"></i> Reproducción Animada`;
+            } else {
+                elements.playRadarBtn.innerHTML = `<i class="fa-solid fa-pause"></i> Pausar`;
+                state.radarInterval = setInterval(() => {
+                    state.radarLayers[state.currentRadarIndex].setOpacity(0);
+                    state.currentRadarIndex = (state.currentRadarIndex + 1) % state.radarLayers.length;
+                    state.radarLayers[state.currentRadarIndex].setOpacity(0.75);
+                }, 750);
+            }
+        }
+
+        function updateForecastUI() {
+            elements.hourlyContainer.innerHTML = '';
+            const hourly = state.weatherData.hourly;
+            for (let i = 0; i < 12; i++) {
+                const time = new Date(hourly.time[i]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const temp = Math.round(hourly.temperature_2m[i]);
+                const info = getWeatherInfo(hourly.weather_code[i]);
+                const card = document.createElement('div');
+                card.className = "flex-none bg-slate-900/80 border border-slate-700/60 p-3 rounded-xl text-center w-24";
+                card.innerHTML = `<p class="text-xs text-slate-400">${time}</p><div class="text-xl text-blue-400 my-1"><i class="fa-solid ${info.icon}"></i></div><p class="text-base font-bold text-white">${temp}°C</p>`;
+                elements.hourlyContainer.appendChild(card);
+            }
+
+            elements.dailyContainer.innerHTML = '';
+            const daily = state.weatherData.daily;
+            for (let i = 0; i < 7; i++) {
+                const day = new Date(daily.time[i]).toLocaleDateString('es-ES', { weekday: 'short' });
+                const max = Math.round(daily.temperature_2m_max[i]);
+                const min = Math.round(daily.temperature_2m_min[i]);
+                const card = document.createElement('div');
+                card.className = "bg-slate-900/80 border border-slate-700/60 p-3 rounded-xl text-center";
+                card.innerHTML = `<p class="text-xs font-bold text-slate-300 capitalize">${day}</p><p class="text-sm font-bold text-white mt-1">${max}° / ${min}°</p>`;
+                elements.dailyContainer.appendChild(card);
+            }
+        }
+
+        function updateHistoricalAndHeritageUI() {
+            const city = state.cityName.split(',')[0];
+            elements.heritageCityTag.textContent = city;
+            elements.cityHistoryText.textContent = `${city} cuenta con una rica tradición histórica y monumental reflejada en su arquitectura y legado cultural.`;
+            elements.landmarksContainer.innerHTML = `<div class="bg-slate-900/60 p-3 rounded-xl border border-slate-700"><h5 class="text-xs font-bold text-white">Casco Histórico de ${city}</h5><p class="text-[11px] text-slate-400">Punto de interés principal.</p></div>`;
+            elements.eventsContainer.innerHTML = `<div class="bg-slate-900/60 p-3 rounded-xl border border-slate-700"><h5 class="text-xs font-bold text-white">Eventos Culturales Anuales</h5><p class="text-[11px] text-slate-400">Celebraciones tradicionales locales.</p></div>`;
+        }
+
+        function generateActivitiesData() {
+            const city = state.cityName.split(',')[0];
+            state.activitiesList = [
+                { id: '1', title: `Ruta Cultural por ${city}`, category: 'outdoor', icon: 'fa-person-hiking', shortDesc: 'Paseo por los puntos clave.', longDesc: 'Recorrido detallado.', location: city, price: 'Gratis', mapQuery: '#', ticketLink: '#' },
+                { id: '2', title: `Exposición en Museo de ${city}`, category: 'indoor', icon: 'fa-building-columns', shortDesc: 'Arte e historia.', longDesc: 'Muestra permanente.', location: `Museo Municipal, ${city}`, price: '3 €', mapQuery: '#', ticketLink: '#' }
+            ];
+        }
+
+        function renderActivities() {
+            elements.activitiesGrid.innerHTML = '';
+            state.activitiesList.filter(a => state.currentFilter === 'all' || a.category === state.currentFilter).forEach(act => {
+                const card = document.createElement('div');
+                card.className = "bg-slate-900/80 border border-slate-700 p-4 rounded-xl cursor-pointer hover:border-blue-500 transition";
+                card.onclick = () => openModal(act);
+                card.innerHTML = `<div class="flex items-center gap-2 mb-2"><i class="fa-solid ${act.icon} text-blue-400"></i><h4 class="text-sm font-bold text-white">${act.title}</h4></div><p class="text-xs text-slate-300">${act.shortDesc}</p>`;
+                elements.activitiesGrid.appendChild(card);
+            });
+        }
+
+        // Social Feed Generator
+        function generateSocialFeedData() {
+            const city = state.cityName.split(',')[0];
+            state.socialFeedList = [
+                { id: 'f1', type: 'news', source: 'Diario Local', time: 'Hace 30 min', title: `Nuevas actividades culturales anunciadas en ${city}`, text: `El ayuntamiento ha presentado la programación especial para este mes con eventos al aire libre y exposiciones.`, badgeBg: 'bg-blue-500/20 text-blue-300' },
+                { id: 'f2', type: 'offer', source: 'Comercio Local Asociado', time: 'Hace 2 horas', title: 'Descuento especial en hostelería y menús', text: `Presenta esta oferta en establecimientos adheridos y disfruta de un 15% de descuento en menús del día.`, badgeBg: 'bg-emerald-500/20 text-emerald-300' },
+                { id: 'f3', type: 'event', source: 'Agenda Urbana', time: 'Hoy, 18:00', title: 'Concierto acústico en la Plaza Central', text: `Música en directo abierta a todos los públicos con aforo limitado en la plaza principal.`, badgeBg: 'bg-amber-500/20 text-amber-300' },
+                { id: 'f4', type: 'social', source: 'Instagram / @turismo_' + city.toLowerCase(), time: 'Hace 4 horas', title: 'Atardecer espectacular en los miradores', text: `📸 ¡Maravillosas vistas compartidas por nuestros usuarios hoy! No olvides etiquetarnos en tus fotos.`, badgeBg: 'bg-rose-500/20 text-rose-300' }
+            ];
+        }
+
+        function renderSocialFeed() {
+            elements.socialFeedGrid.innerHTML = '';
+            state.socialFeedList.filter(f => state.feedFilter === 'all' || f.type === state.feedFilter).forEach(post => {
+                const card = document.createElement('div');
+                card.className = "bg-slate-900/80 border border-slate-700/60 p-4 rounded-xl flex flex-col justify-between shadow";
+                card.innerHTML = `
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-md ${post.badgeBg}">${post.source}</span>
+                            <span class="text-[10px] text-slate-400">${post.time}</span>
+                        </div>
+                        <h4 class="text-sm font-bold text-white mb-1">${post.title}</h4>
+                        <p class="text-xs text-slate-300 leading-relaxed">${post.text}</p>
+                    </div>
+                    <div class="mt-4 pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-blue-400">
+                        <span class="cursor-pointer hover:underline"><i class="fa-solid fa-share-nodes mr-1"></i> Compartir</span>
+                        <span class="cursor-pointer hover:underline"><i class="fa-solid fa-heart mr-1 text-rose-400"></i> Me gusta</span>
+                    </div>
+                `;
+                elements.socialFeedGrid.appendChild(card);
+            });
+        }
+
+        function openModal(act) {
+            elements.modalTitle.textContent = act.title;
+            elements.modalDescription.textContent = act.longDesc;
+            elements.modalLocation.textContent = act.location;
+            elements.modalPrice.textContent = act.price;
+            elements.activityModal.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            elements.activityModal.classList.add('hidden');
+        }
+
+        function getWeatherInfo(code) {
+            return { desc: "Despejado / Nublado", icon: "fa-cloud-sun" };
+        }
+
+        function showAlert(msg) {
+            elements.alertText.textContent = msg;
+            elements.alertBox.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
